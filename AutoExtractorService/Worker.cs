@@ -100,7 +100,7 @@ namespace AutoExtractorService
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = _options.SevenZipPath,
-                    Arguments = $"x \"{archivePath}\" -o\"{targetDir}\" -p{_options.Password} -y",
+                    Arguments = $"x \"{archivePath}\" -o\"{targetDir}\" -p{_options.Password} -y -sdel",
                     RedirectStandardOutput = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
@@ -109,6 +109,14 @@ namespace AutoExtractorService
                 using(var process = Process.Start(startInfo))
                 {
                     process?.WaitForExit();
+                    if(process.ExitCode == 0)
+                    {
+                        File.Delete(archivePath);
+                    }
+                    else
+                    {
+                        throw new Exception($"解壓縮失敗，7-Zip 回傳錯誤碼：{process.ExitCode}");
+                    }
                 }
 
                 // 處理解壓縮後的檔案
