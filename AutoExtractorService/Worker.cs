@@ -84,6 +84,9 @@ namespace AutoExtractorService
 
         private void ProcessArchive(string archivePath)
         {
+            var passwords = _options.Password ?? new List<string> { string.Empty };
+            bool isSuccess = false;
+
             try
             {
                 WaitForFileUnlock(archivePath);
@@ -96,27 +99,37 @@ namespace AutoExtractorService
 
                 _logger.LogInformation("開始解壓縮：{ArchiveName}", archiveInfo.Name);
 
-                // 呼叫 7-Zip 進行解壓縮
-                var startInfo = new ProcessStartInfo
+                foreach (var password in passwords)
                 {
-                    FileName = _options.SevenZipPath,
-                    Arguments = $"x \"{archivePath}\" -o\"{targetDir}\" -p{_options.Password} -y -sdel",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                    string arguments = $"x \"{archivePath}\" -o\"{targetDir}\" -p{password} -y";
 
-                using(var process = Process.Start(startInfo))
+                    // 呼叫 7-Zip 進行解壓縮
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = _options.SevenZipPath,
+                        Arguments = arguments,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    using (var process = Process.Start(startInfo))
+                    {
+                        process?.WaitForExit();
+
+                        // ExitCode == 0 代表解壓縮成功
+                        if(process?.ExitCode == 0)
+                        {
+                            _logger.LogInformation("檔案 {ArchiveName} 解壓縮成功，使用密碼：{Password}", archiveInfo.Name, string.IsNullOrEmpty(password) ? "(無密碼)" : password);
+                            File.Delete(archivePath);
+                            isSuccess = true;
+                            break;
+                        }
+                    }
+                }
+                // 如果所有密碼都嘗試過後仍然失敗，則拋出例外
+                if (!isSuccess)
                 {
-                    process?.WaitForExit();
-                    if(process.ExitCode == 0)
-                    {
-                        File.Delete(archivePath);
-                    }
-                    else
-                    {
-                        throw new Exception($"解壓縮失敗，7-Zip 回傳錯誤碼：{process.ExitCode}");
-                    }
+                    throw new Exception($"檔案 {Path.GetFileName(archivePath)} 解壓失敗，密碼不正確或檔案毀損");
                 }
 
                 // 處理解壓縮後的檔案
@@ -141,7 +154,7 @@ namespace AutoExtractorService
                         bool isBakVideo = file.Name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase);
                         bool isSubtitle = _subExts.Contains(file.Extension);
 
-                        if(!isBakVideo && !isSubtitle)
+                        if (!isBakVideo && !isSubtitle)
                         {
                             file.Delete();
                             _logger.LogInformation("刪除檔案 {FileName}", file.FullName);
