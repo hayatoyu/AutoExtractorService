@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +12,9 @@ namespace AutoExtractorService
 
         private readonly HashSet<string> _videoExts, _subExts, _archiveExts;
         private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
+        private readonly ConcurrentDictionary<Guid, Task> _runningTask = new();
+        private volatile bool _isStopping = false;
 
         private FileSystemWatcher? _watcher;
 
@@ -114,7 +118,15 @@ namespace AutoExtractorService
                     };
                     using (var process = Process.Start(startInfo))
                     {
-                        process?.WaitForExit();
+                        bool isExited = process?.WaitForExit(_options.SevenZipTimeout) ?? false;
+
+                        // 解壓縮超時
+                        if(!isExited)
+                        {
+                            process?.Kill();
+                            _logger.LogWarning("解壓超時");
+                            continue;   // 嘗試下一個密碼，直到所有密碼都試完跳出迴圈，才會在 finally 釋放 Semaphore
+                        }
 
                         // ExitCode == 0 代表解壓縮成功
                         if(process?.ExitCode == 0)
@@ -191,6 +203,35 @@ namespace AutoExtractorService
                     Thread.Sleep(1000);
                 }
             }
+        }
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _isStopping = true;
+            
+            // 停止接收新事件，讓 Dispose() 來統一釋放
+            if(_watcher != null)
+            {
+                _watcher.EnableRaisingEvents = false;
+            }
+
+            // 凍結當前正在執行的任務快照
+            var activeTasks = _runningTask.Values.ToArray();
+
+            if(activeTasks.Length > 0)
+            {
+                _logger.LogInformation("等待 {Count} 個解壓任務完成...", activeTasks.Length);
+                try
+                {
+                    // 同時等待任務完成與 Windows 關閉 Timeout
+                    await Task.WhenAny(Task.WhenAll(activeTasks), Task.Delay(-1, cancellationToken));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "等待背景任務結束時發生例外");
+                }
+            }           
+            await base.StopAsync(cancellationToken);
         }
 
         public override void Dispose()

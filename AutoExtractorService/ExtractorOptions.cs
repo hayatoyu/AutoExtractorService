@@ -12,6 +12,7 @@ namespace AutoExtractorService
 
         public string WatchFolder { get; set; } = string.Empty;
         public string SevenZipPath { get; set; } = string.Empty;
+        public int SevenZipTimeout { get; set; } = 600000;
         public List<string> Password { get; set; } = new List<string>();
         public List<string> VideoExtensions { get; set; } = new List<string>();
         public List<string> SubtitleExtensions { get; set; } = new List<string>();
