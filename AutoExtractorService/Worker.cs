@@ -88,13 +88,17 @@ namespace AutoExtractorService
 
         private void ProcessArchive(string archivePath)
         {
+            _logger.LogInformation("等待檔案寫入/下載完成：{ArchivePath}", archivePath);
+            if(!WaitForFileUnlock(archivePath))
+            {
+                _logger.LogWarning("檔案 {ArchivePath} 無法解鎖，可能正在被其他程式使用。", archivePath);
+                return;
+            }
             var passwords = _options.Password ?? new List<string> { string.Empty };
             bool isSuccess = false;
 
             try
-            {
-                WaitForFileUnlock(archivePath);
-
+            {                
                 var archiveInfo = new FileInfo(archivePath);
                 if (!archiveInfo.Exists) return;
 
@@ -182,26 +186,35 @@ namespace AutoExtractorService
             }
         }
 
-        private static void WaitForFileUnlock(string filePath)
+        private static bool WaitForFileUnlock(string filePath)
         {
             while (true)
             {
+                if(!File.Exists(filePath))
+                {
+                    return false;
+                }
                 try
                 {
                     using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
                     if (stream != null)
                     {
-                        break;
+                        return true;
                     }
+                }
+                catch(FileNotFoundException)
+                {
+                    return false;
                 }
                 catch (IOException)
                 {
-                    Thread.Sleep(1000);
+                    
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    Thread.Sleep(1000);
+                    
                 }
+                Thread.Sleep(1000);
             }
         }
 
